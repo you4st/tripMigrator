@@ -10,3 +10,35 @@
 
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
+
+.idea
+*.iml
+.DS_STORE
+.settings
+.project
+.classpath
+.factoryPath
+.factorypath
+target
+.metadata
+.externalToolBuilders
+.bash_aliases
+.bashrc
+.bash_history
+.gitconfig
+.gitk
+.modtime-snapshot.json
+.ssh
+_viminfo
+dependency-reduced-pom.xml
+release.pom
+ 
+d-pom.xmljcr-sync modification time snapshots
+.modtime-snapshot.json
+
+
+# Sublime Text workspace files
+*.sublime-workspace
+
+# log files
+*.log
