@@ -19,6 +19,7 @@ import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
@@ -34,6 +35,7 @@ import java.util.stream.Collectors;
  */
 public class TripDataBuilder {
     private Map<String, JSONObject> tripJsons;
+    private Map<String, String> tripXmls;
     private List<String> extensions;
     private JSONObject list;
 
@@ -62,6 +64,7 @@ public class TripDataBuilder {
     private JSONObject buildTripList() throws DataBuilderException {
         String listUrl = TripConstants.DOC_BASE + TripConstants.DOC_TRIP_LIST;
         tripJsons = new HashMap<>();
+        tripXmls = new HashMap<>();
 
         try {
             JSONObject tripListOld = TripUtils.getJsonFromXml(TripUtils.getFileContent(listUrl))
@@ -103,7 +106,7 @@ public class TripDataBuilder {
             regionName = "pacific";
         }
         // replace "Antarctica" to "polar"
-        if (regionName.equals("Antarctica")) {
+        if (regionName.equalsIgnoreCase("Antarctica")) {
             regionName = "polar";
         }
 
@@ -119,11 +122,12 @@ public class TripDataBuilder {
 
         try {
             String tripUrl = TripConstants.DOC_BASE + path;
-            JSONObject tripJson = TripUtils.getJsonFromXml(TripUtils.getFileContent(tripUrl))
-                    .getJSONObject("trip_id");
+            String tripXml = TripUtils.getFileContent(tripUrl);
+            JSONObject tripJson = TripUtils.getJsonFromXml(tripXml).getJSONObject("trip_id");
             if (tripJson != null) {
                 String tripId = tripJson.getString("trip_id_number");
                 tripJsons.put(tripId, tripJson);
+                tripXmls.put(tripId, tripXml);
 
                 trip.put("path", getRegionPath(path));
                 trip.put("tripId", tripId);
@@ -145,11 +149,11 @@ public class TripDataBuilder {
                 processBagicInfo(region);
                 processDetailInfo(region);
                 processGallery(region);
-                processExtension();
             } catch (JSONException e) {
                 throw new DataBuilderException(e.getMessage());
             }
         }
+        processExtension();
     }
 
     private void processBagicInfo(JSONObject region) throws DataBuilderException {
@@ -162,81 +166,36 @@ public class TripDataBuilder {
                 String tripPath = trip.getString("path");
                 String tripId = trip.getString("tripId");
                 String tripLegacyId = trip.getString("tripLegacyId");
-                JSONObject tripOld = tripJsons.get(tripId);
-                JSONObject tripNew = new JSONObject();
-                tripNew.put("tripId", tripId);
-                tripNew.put("tripLegacyId", tripLegacyId);
-                tripNew.put("region", regionName);
-                tripNew.put("country", tripOld.getString("country"));
-                if (tripOld.has("state")) {
-                    tripNew.put("state", tripOld.getString("state"));
-                }
-                tripNew.put("tripTitle", getTypedContent(tripOld.get("trip_title")));
-                tripNew.put("tripSubtitle", "SUBTITLE");
-                tripNew.put("pageTitle", getTypedContent(tripOld.get("page_title")));
-                tripNew.put("metaDescription", getTypedContent(tripOld.get("meta_description")));
-                tripNew.put("days", getTypedContent(tripOld.get("totalDays")));
-                if (tripOld.has("groupSize")) {
-                    tripNew.put("groupSize", getTypedContent(tripOld.get("groupSize")));
-                } else {
-                    System.out.println("No group size: " + regionName + ":" + tripId);
-                }
-                tripNew.put("activityLevel", getTypedContent(tripOld.get("activity_level")));
-                tripNew.put("activities", processActivities(tripOld.getJSONObject("activities")));
-                tripNew.put("price", processPrice(tripOld.getJSONObject("tripCosts")));
-                JSONObject gallery = processImages(regionName, tripId);
-                if (tripOld.has("video")) {
-                    gallery = processVideo(gallery, tripOld.getJSONObject("video"));
-                }
-                tripNew.put("tripGallery", gallery);
-                tripNew.put("tripDates", processDates(tripOld.get("trip_dates")));
-                if (tripOld.has("accomodations")) {
-                    tripNew.put("accommodations", tripOld.getJSONObject("accomodations")
-                        .getString("accomodationDescription"));
-                }
-                JSONArray tags = new JSONArray();
-                if (tripOld.has("trip_subtype")) {
-                    String tripSubType = tripOld.getString("trip_subtype");
-                    tags.put(tripSubType);
-                }
-                if (!tripOld.getString("trip_type").equalsIgnoreCase(TripConstants.TRIP_TYPE_REGULAR)) {
-                    tags.put(tripOld.getString("trip_type"));
-                }
-                tripNew.put("tags", tags);
-                tripNew.put("primaryActivities", processPrimaryActivities(tripOld.getString("primary_activities")));
-                if (tripOld.has("destination_bullet_list")) {
-                    tripNew.put("destinationTypes",
-                            processDestinationTypes(tripOld.getJSONObject("destination_bullet_list")));
-                }
-                if (tripOld.has("trip_listing_summary")) {
-                    tripNew.put("tripShortSummary", tripOld.getJSONObject("trip_listing_summary").getString("p"));
-                } else {
-                    tripNew.put("tripShortSummary", processShortSummary(tripPath, tripId));
-                }
-                tripNew.put("heroCardAlign", "left");
 
-                TripUtils.createDirectory(TripConstants.TRIP_JSON_PATH + regionName + "/" + tripId);
-                TripUtils.writeJsonToFile(
-                        regionName + "/" + tripId + ".json", tripNew);
-
-                JSONArray tabs = tripOld.getJSONArray("tab");
-                for (int j = 0; j < tabs.length(); j++) {
-                    JSONObject tab = tabs.getJSONObject(j);
-                    String tabFile = tab.getString("tab_file");
-                    if (tabFile.equals("extension")) {
-                        extensions.add(regionName + ":" + tripId);
-                    }
-                }
+                createBasicJson(tripPath, regionName, tripId, tripLegacyId);
             }
         } catch (JSONException e) {
-            throw new DataBuilderException(e.getMessage());
-        } catch (IOException e) {
             throw new DataBuilderException(e.getMessage());
         }
     }
 
+    private String getShortSummaryFromXml(String tripId) {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        String shortSummary = "";
+
+        try {
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document doc = builder.parse(new ByteArrayInputStream(tripXmls.get(tripId).getBytes()));
+            Element ele = (Element) doc.getElementsByTagName("trip_listing_summary").item(0);
+            shortSummary = processTripSummary(ele);
+        } catch (SAXException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (ParserConfigurationException e) {
+            e.printStackTrace();
+        }
+
+        return shortSummary;
+    }
+
     private void processDetailInfo(JSONObject region) throws DataBuilderException {
-        Set<String> possibleKeys = new HashSet<>();
         try {
             String regionName = region.getString("regionName");
             JSONArray regionTrips = region.getJSONArray("trips");
@@ -245,67 +204,10 @@ public class TripDataBuilder {
                 JSONObject trip = regionTrips.getJSONObject(i);
                 String tripPath = trip.getString("path");
                 String tripId = trip.getString("tripId");
-                Document doc = getXmlDocument(tripPath, tripId, TripConstants.DOC_DETAIL_FILE_NAME);
-
-                if (doc != null) {
-                    JSONObject json = new JSONObject();
-                    json.put("map", TripConstants.TRIP_IMG_ASSETS_BASE + "tripMaps/" + tripId + "_map.jpg");
-
-                    if (doc.getElementsByTagName("trip_summary").getLength() > 0) {
-                        json.put("tripSummary",
-                            processTripSummary((Element) doc.getElementsByTagName("trip_summary").item(0)));
-                        json.put("highlight",
-                                processTripHighlight((Element) doc.getElementsByTagName("trip_summary").item(0)));
-                    }
-
-                    String itineraryNote = "";
-
-                    if (doc.getElementsByTagName("additional_information").getLength() > 0) {
-                        Map<String, JSONObject> info = processAdditionalInfo(
-                                (Element) doc.getElementsByTagName("additional_information").item(0), possibleKeys);
-                        if (info.containsKey("noteOnItinerary")) {
-                            itineraryNote = info.get("noteOnItinerary").getString("content");
-                            info.remove("noteOnItinerary");
-                        }
-                        json.put("additionalInfo", info);
-                    }
-
-                    if (doc.getElementsByTagName("itinerary").getLength() > 0) {
-                        json.put("itinerary", processItinerary(
-                                itineraryNote, (Element) doc.getElementsByTagName("itinerary").item(0)));
-                    }
-
-                    if (doc.getElementsByTagName("omit_general_information").getLength() > 0) {
-                        json.put("noGeneralInfo", true);
-                    }
-
-                    // adding a fake trip guide
-                    JSONArray guides = new JSONArray();
-                    JSONObject guide = new JSONObject();
-                    guide.put("name", "Anderson Smith");
-                    guide.put("description", "Anderson was born in Lesiraa Village in the heart of Maasai country. The Maasai are pastoralists, and as a young man Anderson herded his family's livestock in the bush.");
-                    guide.put("image", "/assets/img/adventures/trip/guides/anderson_smith.jpg");
-                    json.put("tripGuide", guides.put(guide));
-
-                    // adding a fake program manager
-                    JSONObject manager = new JSONObject();
-                    manager.put("name", "Rebecca Taylor");
-                    manager.put("description", "Rebecca is a great program manager.");
-                    manager.put("image", "/assets/img/adventures/trip/programManagers/rebecca_taylor.jpg");
-                    json.put("programManager", manager);
-
-                    // add gear content
-                    json.put("gearContents", processGear(tripPath, tripId));
-
-                    TripUtils.createDirectory(TripConstants.TRIP_JSON_PATH + regionName + "/" + tripId);
-                    TripUtils.writeJsonToFile(regionName + "/" + tripId + "/" + tripId + "-" +
-                            TripConstants.TRIP_DETAIL_FILENAME, json);
-                }
+                createDetailJson(tripPath, regionName, tripId);
             }
-            //System.out.println("KEYS: " + possibleKeys.toString());
+
         } catch (JSONException e) {
-            throw new DataBuilderException(e.getMessage());
-        } catch (IOException e) {
             throw new DataBuilderException(e.getMessage());
         }
     }
@@ -351,7 +253,7 @@ public class TripDataBuilder {
                             NodeList copy = ele.getElementsByTagName("p");
                             for (int l = 0; l < copy.getLength(); l++) {
                                 content += TripUtils.nodeToString(copy.item(l)).
-                                        replaceAll("\\r|\\n", "").replaceAll("\\s+", " ");
+                                        replaceAll("\\r|\\n|\\t", "").replaceAll("\\s+", " ");
                             }
                             if (value.length() > 0 && content.length() > 0) {
                                 JSONObject misc = new JSONObject();
@@ -377,60 +279,129 @@ public class TripDataBuilder {
             ObjectMapper mapper = new ObjectMapper();
             JsonNode json = mapper.readTree(TripUtils.getJsonFromXml(doc).toString())
                     .get("cross-sell-list").get("cross-sell");
-            Map<String, List<Map<String, String>>> map = new HashMap<>();
-            List<Map<String, String>> extList = new ArrayList<>();
-            List<Map<String, String>> relatedList = new ArrayList<>();
+            Map<String, List<Map<String, Object>>> map = new HashMap<>();
+            List<Map<String, Object>> extList = new ArrayList<>();
+            List<Map<String, Object>> relatedList = new ArrayList<>();
 
             json.forEach(ext -> {
                 String type = ext.get("type").textValue();
                 String[] code = ext.get("cross-sell-trip").textValue().split("/");
                 String region = code[0];
                 String tripLegacyId = code[1];
-                String tripId = getTripIdByTripLegacyId(region, tripLegacyId);
+                String tripId = getTripIdFromTripList(region, tripLegacyId);
 
-                if (StringUtils.isBlank(tripId)) {
+                if (StringUtils.isBlank(tripId) && !tripLegacyId.contains("_dir")) {
                     // no trip data, let's create it.
+                    String tripPath = "/adventures/trips/" + region + "/";
+                    String tripUrl = TripConstants.DOC_BASE + tripPath + tripLegacyId + ".xml";
+                    String tripXml = null;
                     try {
-                        String tripUrl = TripConstants.DOC_BASE +
-                                "/adventures/trips/" + region + "/" + tripLegacyId + ".xml";
-
-                        JSONObject tripJson = TripUtils.getJsonFromXml(TripUtils.getFileContent(tripUrl))
-                                .getJSONObject("trip_id");
-
-                    } catch (JSONException e) {
-                        e.printStackTrace();
+                        tripXml = TripUtils.getFileContent(tripUrl);
+                        JSONObject tripJson = TripUtils.getJsonFromXml(tripXml).getJSONObject("trip_id");
+                        if (tripJson != null) {
+                            tripId = tripJson.getString("trip_id_number");
+                            System.out.println("creating extension trip: " + region + ":" + tripId);
+                            tripJsons.put(tripId, tripJson);
+                            tripXmls.put(tripId, tripXml);
+                            createBasicJson(tripPath, getRegionName(region), tripId, tripLegacyId);
+                            createDetailJson(tripPath, getRegionName(region), tripId);
+                            createGalleryJson(tripPath, getRegionName(region), tripId);
+                        }
                     } catch (IOException e) {
                         e.printStackTrace();
+                    } catch (JSONException e) {
+                        e.printStackTrace();
+                    }
+
+                }
+
+                // manually set the tripId for embedded extension
+                if (StringUtils.isBlank(tripId)) {
+                    switch (tripLegacyId) {
+                        case "gan_dir":
+                        case "gis_dir":
+                            tripId = "npo";
+                            break;
+                        case "thm_dir":
+                            tripId = "ths";
+                            break;
+                        case "fta_dir":
+                            tripId = "ftk";
+                            break;
+                        case "vie_dir":
+                            tripId = "hal";
+                            break;
+                        case "cro_dir":
+                            tripId = "dbv";
+                            break;
+                        case "cyc_dir":
+                            tripId = "ddc";
+                            break;
                     }
                 }
 
-                Map<String, String> item = new HashMap<>();
-                item.put("crossSellTrip", ext.get("cross-sell-trip").textValue());
-                if (type.equals("extension")) {
+                Map<String, Object> item = new HashMap<>();
+                item.put("crossSellTrip", tripId);
+                List<String> mainTrips = new ArrayList<>();
+                JsonNode node = ext.get("main-trips").get("main-trip");
+                if (node.isArray()) {
+                    node.forEach(main -> {
+                        String[] mainCode = main.textValue().split("/");
+                        mainTrips.add(getTripIdByTripLegacyId(mainCode[0], mainCode[1]));
+                    });
+                } else {
+                    String[] mainCode = node.textValue().split("/");
+                    mainTrips.add(getTripIdByTripLegacyId(mainCode[0], mainCode[1]));
+                }
+                item.put("mainTrips", mainTrips);
 
+                if (type.equals("related")) {
+                    relatedList.add(item);
+                } else {
+                    extList.add(item);
                 }
 
-                System.out.println(ext.get("cross-sell-trip"));
             });
 
-//            extensions.forEach(code -> {
-//
-//            });
+            map.put("extension", extList);
+            map.put("related", relatedList);
 
+            JSONObject newExtension = new JSONObject(map);
+            TripUtils.writeJsonToFile("crossSellList.json", newExtension);
         } catch (Exception e) {
             throw new DataBuilderException(e.getMessage());
         }
     }
 
-    private String getTripIdByTripLegacyId(String regionName, String tripLegacyId) {
+    private String getTripIdByTripLegacyId(String oRegion, String tripLegacyId) {
         try {
+            String tripPath = "/adventures/trips/" + oRegion + "/";
+            String tripUrl = TripConstants.DOC_BASE + tripPath + tripLegacyId + ".xml";
+            String tripXml = TripUtils.getFileContent(tripUrl);
+            JSONObject tripJson = TripUtils.getJsonFromXml(tripXml).getJSONObject("trip_id");
+
+            if (tripJson.has("trip_id_number")) {
+                return tripJson.getString("trip_id_number");
+            }
+        } catch (JSONException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return null;
+    }
+
+    private String getTripIdFromTripList(String oRegion, String tripLegacyId) {
+        try {
+            String regionName = getRegionName(oRegion);
             JSONArray regions = list.getJSONArray("tripList");
             for (int i = 0; i < regions.length(); i++) {
                 JSONObject region = regions.getJSONObject(i);
                 if (region.getString("regionName").equals(regionName)) {
                     JSONArray trips = region.getJSONArray("trips");
                     for (int j = 0; j < trips.length(); j++) {
-                        JSONObject trip = regions.getJSONObject(j);
+                        JSONObject trip = trips.getJSONObject(j);
                         if (trip.getString("tripLegacyId").equals(tripLegacyId)) {
                             return trip.getString("tripId");
                         }
@@ -444,6 +415,20 @@ public class TripDataBuilder {
         return null;
     }
 
+    private String getRegionName(String oRegion) {
+        switch (oRegion) {
+            case "antarctica":
+                return "polar";
+            case "latin":
+                return "latinAmerica";
+            case "namer":
+            case "weekend":
+                return "northAmerica";
+            default:
+                return oRegion;
+        }
+    }
+
     private void processGallery(JSONObject region) throws DataBuilderException {
         try {
             String regionName = region.getString("regionName");
@@ -454,47 +439,9 @@ public class TripDataBuilder {
                 String tripPath = trip.getString("path");
                 String tripId = trip.getString("tripId");
 
-                String url = TripConstants.DOC_BASE + tripPath + tripId + TripConstants.DOC_SLIDE_SHOW_FILE_NAME;
-                String xml = "";
-                try {
-                    xml = TripUtils.getFileContent(url);
-                } catch (IOException e) {
-                    System.out.println("No slideshow: " + regionName + ":" + trip.getString("tripLegacyId"));
-                }
-                if (StringUtils.isNotBlank(xml)) {
-                    JSONObject json = new JSONObject();
-                    JSONArray pics = TripUtils.castToJSONArray(TripUtils.getJsonFromXml(xml)
-                            .getJSONObject("images").get("pic"));
-                    JSONArray images = new JSONArray();
-
-                    for (int j = 0; j < pics.length(); j++) {
-                        JSONObject pic = pics.getJSONObject(j);
-                        JSONObject image = new JSONObject();
-                        image.put("type", "image");
-                        String imageSrc = pic.getString("image");
-                        String thumbSrc = pic.getString("thumbnail");
-                        String base = TripConstants.TRIP_IMG_ASSETS_BASE + "regions/" +
-                                regionName + "/" + tripId + "/";
-                        image.put("url", base + imageSrc.toLowerCase().substring(imageSrc.lastIndexOf('/') + 1));
-                        image.put("thumbnail", base + thumbSrc.toLowerCase().substring(thumbSrc.lastIndexOf('/') + 1));
-                        if (pic.has("imagetitle")) {
-                            image.put("title", pic.getString("imagetitle"));
-                        }
-                        if (pic.has("caption")) {
-                            image.put("caption", pic.getString("caption"));
-                        }
-                        images.put(image);
-                    }
-
-                    json.put("images", images);
-                    TripUtils.createDirectory(TripConstants.TRIP_JSON_PATH + regionName + "/" + tripId);
-                    TripUtils.writeJsonToFile(regionName + "/" + tripId + "/" + tripId + "-" +
-                           TripConstants.TRIP_GALLERY_FILENAME, json);
-                }
+                createGalleryJson(tripPath, regionName, tripId);
             }
         } catch (JSONException e) {
-            throw new DataBuilderException(e.getMessage());
-        } catch (IOException e) {
             throw new DataBuilderException(e.getMessage());
         }
     }
@@ -600,7 +547,9 @@ public class TripDataBuilder {
                             JSONObject option = options.getJSONObject(k);
                             JSONObject optionNew = new JSONObject();
                             optionNew.put("type", "option");
-                            optionNew.put("amount", option.getString("amount"));
+                            if (option.has("amount")) {
+                                optionNew.put("amount", option.getString("amount"));
+                            }
                             if (option.has("note")) {
                                 optionNew.put("note", option.getString("note"));
                             }
@@ -727,7 +676,7 @@ public class TripDataBuilder {
         NodeList list = ele.getElementsByTagName("p");
         String summary = "";
         for (int i = 0; i < list.getLength(); i++) {
-            summary += TripUtils.nodeToString(list.item(i)).replaceAll("\\r|\\n", "");
+            summary += TripUtils.nodeToString(list.item(i)).replaceAll("\\r|\\n|\\t", "");
         }
 
         return summary;
@@ -800,7 +749,7 @@ public class TripDataBuilder {
         return json;
     }
 
-    private Map<String, JSONObject> processAdditionalInfo(Element info, Set<String> possibleKeys) {
+    private Map<String, JSONObject> processAdditionalInfo(Element info) {
 
         Map<String, JSONObject> additionalInfo = new HashMap<>();
         NodeList list = info.getElementsByTagName("item");
@@ -838,11 +787,189 @@ public class TripDataBuilder {
             }
 
             if (StringUtils.isNotBlank(key)) {
-                possibleKeys.add(key);
                 additionalInfo.put(key, json);
             }
         }
 
         return additionalInfo;
+    }
+
+    private void createBasicJson(String tripPath, String regionName, String tripId, String tripLegacyId) {
+        JSONObject tripOld = tripJsons.get(tripId);
+        JSONObject tripNew = new JSONObject();
+
+        try {
+            tripNew.put("tripId", tripId);
+            tripNew.put("tripLegacyId", tripLegacyId);
+            tripNew.put("region", regionName);
+            if (tripOld.has("country")) {
+                tripNew.put("country", tripOld.getString("country"));
+            }
+            if (tripOld.has("state")) {
+                tripNew.put("state", tripOld.getString("state"));
+            }
+            tripNew.put("tripTitle", getTypedContent(tripOld.get("trip_title")));
+            tripNew.put("tripSubtitle", "SUBTITLE");
+            tripNew.put("pageTitle", getTypedContent(tripOld.get("page_title")));
+            tripNew.put("metaDescription", getTypedContent(tripOld.get("meta_description")));
+            tripNew.put("days", getTypedContent(tripOld.get("totalDays")));
+            if (tripOld.has("groupSize")) {
+                tripNew.put("groupSize", getTypedContent(tripOld.get("groupSize")));
+            } else {
+                System.out.println("No group size: " + regionName + ":" + tripId);
+            }
+            tripNew.put("activityLevel", getTypedContent(tripOld.get("activity_level")));
+            tripNew.put("activities", processActivities(tripOld.getJSONObject("activities")));
+            tripNew.put("price", processPrice(tripOld.getJSONObject("tripCosts")));
+            JSONObject gallery = processImages(regionName, tripId);
+            if (tripOld.has("video")) {
+                gallery = processVideo(gallery, tripOld.getJSONObject("video"));
+            }
+            tripNew.put("tripGallery", gallery);
+            tripNew.put("tripDates", processDates(tripOld.get("trip_dates")));
+            if (tripOld.has("accomodations")) {
+                tripNew.put("accommodations", tripOld.getJSONObject("accomodations")
+                        .getString("accomodationDescription"));
+            }
+            JSONArray tags = new JSONArray();
+            if (tripOld.has("trip_subtype")) {
+                String tripSubType = tripOld.getString("trip_subtype");
+                tags.put(tripSubType);
+            }
+            if (!tripOld.getString("trip_type").equalsIgnoreCase(TripConstants.TRIP_TYPE_REGULAR)) {
+                tags.put(tripOld.getString("trip_type"));
+            }
+            tripNew.put("tags", tags);
+            if (tripOld.has("primary_activities")) {
+                tripNew.put("primaryActivities", processPrimaryActivities(tripOld.getString("primary_activities")));
+            }
+            if (tripOld.has("destination_bullet_list")) {
+                tripNew.put("destinationTypes",
+                        processDestinationTypes(tripOld.getJSONObject("destination_bullet_list")));
+            }
+            if (tripOld.has("trip_listing_summary")) {
+                tripNew.put("tripShortSummary", getShortSummaryFromXml(tripId));
+            } else {
+                tripNew.put("tripShortSummary", processShortSummary(tripPath, tripId));
+            }
+            tripNew.put("heroCardAlign", "left");
+
+            TripUtils.createDirectory(TripConstants.TRIP_JSON_PATH + regionName + "/" + tripId);
+            TripUtils.writeJsonToFile(
+                    regionName + "/" + tripId + ".json", tripNew);
+
+        } catch (JSONException e) {
+            e.printStackTrace();
+        } catch (DataBuilderException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void createDetailJson(String tripPath, String regionName, String tripId) {
+        Document doc = getXmlDocument(tripPath, tripId, TripConstants.DOC_DETAIL_FILE_NAME);
+
+        if (doc != null) {
+            try {
+                JSONObject json = new JSONObject();
+                json.put("map", TripConstants.TRIP_IMG_ASSETS_BASE + "tripMaps/" + tripId + "_map.jpg");
+
+                if (doc.getElementsByTagName("trip_summary").getLength() > 0) {
+                    json.put("tripSummary",
+                            processTripSummary((Element) doc.getElementsByTagName("trip_summary").item(0)));
+                    json.put("highlight",
+                            processTripHighlight((Element) doc.getElementsByTagName("trip_summary").item(0)));
+                }
+
+                String itineraryNote = "";
+
+                if (doc.getElementsByTagName("additional_information").getLength() > 0) {
+                    Map<String, JSONObject> info = processAdditionalInfo(
+                            (Element) doc.getElementsByTagName("additional_information").item(0));
+                    if (info.containsKey("noteOnItinerary")) {
+                        itineraryNote = info.get("noteOnItinerary").getString("content");
+                        info.remove("noteOnItinerary");
+                    }
+                    json.put("additionalInfo", info);
+                }
+
+                if (doc.getElementsByTagName("itinerary").getLength() > 0) {
+                    json.put("itinerary", processItinerary(
+                            itineraryNote, (Element) doc.getElementsByTagName("itinerary").item(0)));
+                }
+
+                if (doc.getElementsByTagName("omit_general_information").getLength() > 0) {
+                    json.put("noGeneralInfo", true);
+                }
+
+                // adding a fake trip guide
+                JSONArray guides = new JSONArray();
+                JSONObject guide = new JSONObject();
+                guide.put("name", "Anderson Smith");
+                guide.put("description", "Anderson was born in Lesiraa Village in the heart of Maasai country. The Maasai are pastoralists, and as a young man Anderson herded his family's livestock in the bush.");
+                guide.put("image", "/assets/img/adventures/trip/guides/anderson_smith.jpg");
+                json.put("tripGuide", guides.put(guide));
+
+                // adding a fake program manager
+                JSONObject manager = new JSONObject();
+                manager.put("name", "Rebecca Taylor");
+                manager.put("description", "Rebecca is a great program manager.");
+                manager.put("image", "/assets/img/adventures/trip/programManagers/rebecca_taylor.jpg");
+                json.put("programManager", manager);
+
+                // add gear content
+                json.put("gearContents", processGear(tripPath, tripId));
+
+                TripUtils.createDirectory(TripConstants.TRIP_JSON_PATH + regionName + "/" + tripId);
+                TripUtils.writeJsonToFile(regionName + "/" + tripId + "/" + tripId + "-" +
+                        TripConstants.TRIP_DETAIL_FILENAME, json);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private void createGalleryJson(String tripPath, String regionName, String tripId) {
+        String url = TripConstants.DOC_BASE + tripPath + tripId + TripConstants.DOC_SLIDE_SHOW_FILE_NAME;
+        String xml = "";
+        try {
+            xml = TripUtils.getFileContent(url);
+
+            if (StringUtils.isNotBlank(xml)) {
+                JSONObject json = new JSONObject();
+                JSONArray pics = TripUtils.castToJSONArray(TripUtils.getJsonFromXml(xml)
+                        .getJSONObject("images").get("pic"));
+                JSONArray images = new JSONArray();
+
+                for (int j = 0; j < pics.length(); j++) {
+                    JSONObject pic = pics.getJSONObject(j);
+                    JSONObject image = new JSONObject();
+                    image.put("type", "image");
+                    String imageSrc = pic.getString("image");
+                    String thumbSrc = pic.getString("thumbnail");
+                    String base = TripConstants.TRIP_IMG_ASSETS_BASE + "regions/" +
+                            regionName + "/" + tripId + "/";
+                    image.put("url", base + imageSrc.toLowerCase().substring(imageSrc.lastIndexOf('/') + 1));
+                    image.put("thumbnail", base + thumbSrc.toLowerCase().substring(thumbSrc.lastIndexOf('/') + 1));
+                    if (pic.has("imagetitle")) {
+                        image.put("title", pic.getString("imagetitle"));
+                    }
+                    if (pic.has("caption")) {
+                        image.put("caption", pic.getString("caption"));
+                    }
+                    images.put(image);
+                }
+
+                json.put("images", images);
+                TripUtils.createDirectory(TripConstants.TRIP_JSON_PATH + regionName + "/" + tripId);
+                TripUtils.writeJsonToFile(regionName + "/" + tripId + "/" + tripId + "-" +
+                        TripConstants.TRIP_GALLERY_FILENAME, json);
+            }
+        } catch (IOException e) {
+            System.out.println("Not found: " + url);
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
     }
 }

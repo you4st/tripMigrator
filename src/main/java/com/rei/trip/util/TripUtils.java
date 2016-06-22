@@ -16,6 +16,7 @@ import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import java.io.*;
 import java.net.URL;
+import java.nio.charset.Charset;
 
 /**
  * Utility class for trip API.
@@ -26,7 +27,7 @@ public class TripUtils {
 
     public static String getFileContent(String url) throws IOException {
         InputStream input = new URL(url).openStream();
-        String content = IOUtils.toString(input);
+        String content = IOUtils.toString(input, Charset.forName("UTF-8"));
         IOUtils.closeQuietly(input);
 
         return content;
