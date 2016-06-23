@@ -167,7 +167,7 @@ public class TripDataBuilder {
                 String tripId = trip.getString("tripId");
                 String tripLegacyId = trip.getString("tripLegacyId");
 
-                createBasicJson(tripPath, regionName, tripId, tripLegacyId);
+                createBasicJson(tripPath, regionName, tripId, tripLegacyId, true);
             }
         } catch (JSONException e) {
             throw new DataBuilderException(e.getMessage());
@@ -303,7 +303,7 @@ public class TripDataBuilder {
                             System.out.println("creating extension trip: " + region + ":" + tripId);
                             tripJsons.put(tripId, tripJson);
                             tripXmls.put(tripId, tripXml);
-                            createBasicJson(tripPath, getRegionName(region), tripId, tripLegacyId);
+                            createBasicJson(tripPath, getRegionName(region), tripId, tripLegacyId, false);
                             createDetailJson(tripPath, getRegionName(region), tripId);
                             createGalleryJson(tripPath, getRegionName(region), tripId);
                         }
@@ -794,7 +794,9 @@ public class TripDataBuilder {
         return additionalInfo;
     }
 
-    private void createBasicJson(String tripPath, String regionName, String tripId, String tripLegacyId) {
+    private void createBasicJson(
+            String tripPath, String regionName, String tripId, String tripLegacyId, boolean standAlone) {
+
         JSONObject tripOld = tripJsons.get(tripId);
         JSONObject tripNew = new JSONObject();
 
@@ -853,6 +855,7 @@ public class TripDataBuilder {
                 tripNew.put("tripShortSummary", processShortSummary(tripPath, tripId));
             }
             tripNew.put("heroCardAlign", "left");
+            tripNew.put("standAlone", standAlone);
 
             TripUtils.createDirectory(TripConstants.TRIP_JSON_PATH + regionName + "/" + tripId);
             TripUtils.writeJsonToFile(
@@ -944,21 +947,22 @@ public class TripDataBuilder {
 
                 for (int j = 0; j < pics.length(); j++) {
                     JSONObject pic = pics.getJSONObject(j);
-                    JSONObject image = new JSONObject();
-                    image.put("type", "image");
+                    Map<String, String> image = new LinkedHashMap<>();
                     String imageSrc = pic.getString("image");
                     String thumbSrc = pic.getString("thumbnail");
                     String base = TripConstants.TRIP_IMG_ASSETS_BASE + "regions/" +
                             regionName + "/" + tripId + "/";
-                    image.put("url", base + imageSrc.toLowerCase().substring(imageSrc.lastIndexOf('/') + 1));
+                    image.put("image", base + imageSrc.toLowerCase().substring(imageSrc.lastIndexOf('/') + 1));
                     image.put("thumbnail", base + thumbSrc.toLowerCase().substring(thumbSrc.lastIndexOf('/') + 1));
-                    if (pic.has("imagetitle")) {
-                        image.put("title", pic.getString("imagetitle"));
-                    }
                     if (pic.has("caption")) {
                         image.put("caption", pic.getString("caption"));
                     }
-                    images.put(image);
+                    if (pic.has("imagetitle")) {
+                        image.put("title", pic.getString("imagetitle"));
+                    }
+                    image.put("type", "image");
+
+                    images.put(new JSONObject(image));
                 }
 
                 json.put("images", images);
