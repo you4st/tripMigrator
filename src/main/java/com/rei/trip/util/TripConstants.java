@@ -27,8 +27,9 @@ public class TripConstants {
     public static final String TRIP_GALLERY = "gallery";
     public static final String TRIP_DETAIL_FILENAME = TRIP_DETAIL + ".json";
     public static final String TRIP_GALLERY_FILENAME = TRIP_GALLERY + ".json";
-    //public static final String TRIP_JSON_PATH = "/opt/rei/sitedocs
-    public static final String TRIP_JSON_PATH = "/resources/adventures/tripData/";
+    public static final String TRIP_JSON_PATH = "/opt/rei/sitedocs/adventures/tripData/";
+    //public static final String TRIP_JSON_PATH = "/resources/adventures/tripData/";
     public static final String TRIP_IMG_ASSETS_BASE = "/assets/img/adventures/trip/";
     public static final String TRIP_TYPE_REGULAR = "Regular trip";
+    public static final String TRIP_TYPE_SIGNATURE_CAMPING = "signature-camping";
 }

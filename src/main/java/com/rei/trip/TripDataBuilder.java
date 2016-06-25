@@ -167,7 +167,7 @@ public class TripDataBuilder {
                 String tripId = trip.getString("tripId");
                 String tripLegacyId = trip.getString("tripLegacyId");
 
-                createBasicJson(tripPath, regionName, tripId, tripLegacyId, true);
+                createBasicJson(tripPath, regionName, tripId, tripLegacyId, null);
             }
         } catch (JSONException e) {
             throw new DataBuilderException(e.getMessage());
@@ -303,7 +303,7 @@ public class TripDataBuilder {
                             System.out.println("creating extension trip: " + region + ":" + tripId);
                             tripJsons.put(tripId, tripJson);
                             tripXmls.put(tripId, tripXml);
-                            createBasicJson(tripPath, getRegionName(region), tripId, tripLegacyId, false);
+                            createBasicJson(tripPath, getRegionName(region), tripId, tripLegacyId, "regional");
                             createDetailJson(tripPath, getRegionName(region), tripId);
                             createGalleryJson(tripPath, getRegionName(region), tripId);
                         }
@@ -460,41 +460,40 @@ public class TripDataBuilder {
         return jsonObj.toString();
     }
 
-    private JSONObject processImages(String region, String tripId) throws DataBuilderException {
-        try {
-            JSONObject images = new JSONObject();
-            String fileName = TripConstants.TRIP_IMG_ASSETS_BASE + "regions/" + region + "/" + tripId + "/" + tripId;
-            images.put("cardImageUrl", fileName + "_card.jpg");
-            images.put("heroImageUrl", fileName + "_hero.jpg");
-            return images;
-        } catch (JSONException e) {
-            throw new DataBuilderException(e.getMessage());
-        }
+    private JSONObject processImages(String region, String tripId) {
+        Map<String, String> images = new LinkedHashMap<>();
+        String fileName = TripConstants.TRIP_IMG_ASSETS_BASE + "core/" + region + "/" + tripId;
+        images.put("cardImageUrl", fileName + "_card.jpg");
+        images.put("heroImageUrl", fileName + "_hero.jpg");
+        return new JSONObject(images);
     }
 
     private JSONObject processVideo(JSONObject gallery, JSONObject videoObj) throws DataBuilderException {
         try {
             JSONArray galleryItems = new JSONArray();
-            JSONObject video = new JSONObject();
-            video.put("type", "video");
+            Map<String, String> video = new LinkedHashMap<>();
+            video.put("url", videoObj.getString("embed_code"));
+            video.put("thumbnail", videoObj.getString("thumbnail_code"));
             if (videoObj.has("h2")) {
                 video.put("title", videoObj.getString("h2"));
             }
-            video.put("url", videoObj.getString("embed_code"));
-            video.put("thumbnail", videoObj.getString("thumbnail_code"));
-            galleryItems.put(video);
-            gallery.put("galleryItems", galleryItems);
-            return gallery;
+            video.put("type", "video");
+            galleryItems.put(new JSONObject(video));
+            Map<String, Object> newGallery = new LinkedHashMap<>();
+            newGallery.put("cardImageUrl", gallery.getString("cardImageUrl"));
+            newGallery.put("heroImageUrl", gallery.getString("heroImageUrl"));
+            newGallery.put("galleryItems", galleryItems);
+            return new JSONObject(newGallery);
         } catch (JSONException e) {
             throw new DataBuilderException(e.getMessage());
         }
     }
 
-    private JSONArray processDestinationTypes(JSONObject list) throws DataBuilderException {
+    private List<String> processDestinationTypes(JSONObject list) throws DataBuilderException {
         try {
             String pageStr = list.getString("page");
             List<String> pages = Arrays.asList(pageStr.split("\\s*,\\s*"));
-            return new JSONArray(pages);
+            return pages;
         } catch (JSONException e) {
             throw new DataBuilderException(e.getMessage());
         }
@@ -526,51 +525,52 @@ public class TripDataBuilder {
                         JSONArray additionalFees = TripUtils.castToJSONArray(cost.get("price"));
                         for (int j = 0; j < additionalFees.length(); j++) {
                             JSONObject fee = additionalFees.getJSONObject(j);
-                            JSONObject feeNew = new JSONObject();
+                            Map<String, String> feeNew = new LinkedHashMap<>();
                             feeNew.put("type", "additionalFee");
+                            if (fee.has("priceDescription")) {
+                                feeNew.put("priceDescription",
+                                        fee.getString("priceDescription"));
+                            }
                             if (fee.has("amount")) {
                                 feeNew.put("amount", fee.getString("amount"));
                             }
                             if (fee.has("note")) {
                                 feeNew.put("note", fee.getString("note"));
                             }
-                            if (fee.has("priceDescription")) {
-                                feeNew.put("priceDescription",
-                                        fee.getString("priceDescription"));
-                            }
-                            prices.put(feeNew);
+                            prices.put(new JSONObject(feeNew));
                         }
                     }
                     if (cost.getString("costDescription").equals("Options")) {
                         JSONArray options = TripUtils.castToJSONArray(cost.get("price"));
                         for (int k = 0; k < options.length(); k++) {
                             JSONObject option = options.getJSONObject(k);
-                            JSONObject optionNew = new JSONObject();
+                            Map<String, String> optionNew = new LinkedHashMap<>();
                             optionNew.put("type", "option");
+                            if (option.has("priceDescription")) {
+                                optionNew.put("priceDescription",
+                                        option.getString("priceDescription"));
+                            }
                             if (option.has("amount")) {
                                 optionNew.put("amount", option.getString("amount"));
                             }
                             if (option.has("note")) {
                                 optionNew.put("note", option.getString("note"));
                             }
-                            if (option.has("priceDescription")) {
-                                optionNew.put("priceDescription",
-                                        option.getString("priceDescription"));
-                            }
-                            prices.put(optionNew);
+
+                            prices.put(new JSONObject(optionNew));
                         }
                     }
                 }
                 if (cost.has("type")) {
                     if (cost.getString("type").equals("defaultPrice")) {
-                        JSONObject defaultPrice = new JSONObject();
+                        Map<String, String> defaultPrice = new LinkedHashMap<>();
                         defaultPrice.put("type", "default");
-                        defaultPrice.put("amount", cost.getJSONObject("price").getString("amount"));
                         if (cost.getJSONObject("price").has("priceDescription")) {
                             defaultPrice.put("priceDescription",
                                 cost.getJSONObject("price").getString("priceDescription"));
                         }
-                        prices.put(defaultPrice);
+                        defaultPrice.put("amount", cost.getJSONObject("price").getString("amount"));
+                        prices.put(new JSONObject(defaultPrice));
                     }
                 }
                 if (cost.has("rel") && cost.has("def")) {
@@ -581,18 +581,18 @@ public class TripDataBuilder {
                             for (int j = 0; j < priceArray.length(); j++) {
                                 JSONObject priceOld = priceArray.getJSONObject(j);
                                 if (priceOld.has("amount") && !priceOld.getString("amount").equals("{}")) {
-                                    JSONObject price = new JSONObject();
+                                    Map<String, String> price = new LinkedHashMap<>();
                                     if (cost.has("costDescription")) {
                                         price.put("year", cost.getString("costDescription"));
                                     } else if (cost.has("heading")) {
                                         price.put("year", cost.getString("heading"));
                                     }
                                     price.put("type", priceOld.getString("type"));
-                                    price.put("amount", priceOld.getString("amount"));
                                     if (priceOld.has("priceDescription")) {
                                         price.put("priceDescription", priceOld.getString("priceDescription"));
                                     }
-                                    prices.put(price);
+                                    price.put("amount", priceOld.getString("amount"));
+                                    prices.put(new JSONObject(price));
                                 }
                             }
                         }
@@ -606,45 +606,97 @@ public class TripDataBuilder {
         }
     }
 
-    private JSONArray processDates(Object datesObj) throws DataBuilderException {
+    private JSONArray processDates(String region, String id) {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+
         try {
-            JSONArray dates = TripUtils.castToJSONArray(datesObj);
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document doc = builder.parse(new ByteArrayInputStream(tripXmls.get(id).getBytes()));
+            NodeList list = doc.getElementsByTagName("trip_dates");
             JSONArray tripDates = new JSONArray();
 
-            for (int i = 0; i < dates.length(); i++) {
-                JSONObject date = dates.getJSONObject(i);
-                JSONObject tripDate = new JSONObject();
-                if (date.has("year") && date.has("departure")) {
-                    tripDate.put("year", date.getString("year"));
-                    if (date.has("price")) {
-                        tripDate.put("priceFrom", date.getString("price"));
+            for (int i = 0; i < list.getLength(); i++) {
+                Element date = (Element) list.item(i);
+                Map<String, Object> tripDate = new LinkedHashMap<>();
+
+                if (date.hasAttribute("year")) {
+                    tripDate.put("year", date.getAttribute("year").toString());
+                    if (date.hasAttribute("price")) {
+                        tripDate.put("priceFrom", date.getAttribute("price").toString());
                     }
-                    JSONArray departures = TripUtils.castToJSONArray(date.get("departure"));
+
+                    // departures
+                    NodeList departures = date.getElementsByTagName("departure");
                     JSONArray schedules = new JSONArray();
 
-                    for (int j = 0; j < departures.length(); j++) {
-                        JSONObject departure = departures.getJSONObject(j);
-                        JSONObject schedule = new JSONObject();
-                        schedule.put("startDate", departure.getString("start"));
-                        schedule.put("endDate", departure.getString("end"));
-                        if (departure.has("note")) {
-                            Object obj = departure.get("note");
-                            if (obj instanceof String && StringUtils.isNotBlank(obj.toString())) {
-                                schedule.put("note", departure.getString("note"));
+                    for (int j = 0; j < departures.getLength(); j++) {
+                        Element departure = (Element) departures.item(j);
+                        Map<String, Object> schedule = new LinkedHashMap<>();
+                        schedule.put("startDate",
+                                departure.getElementsByTagName("start").item(0).getTextContent());
+                        schedule.put("endDate",
+                                departure.getElementsByTagName("end").item(0).getTextContent());
+                        Element dNote = (Element) departure.getElementsByTagName("note").item(0);
+                        schedule.put("status", "open");
+
+                        if (dNote != null) {
+                            String noteStr = dNote.getTextContent();
+                            if (noteStr.indexOf("Sold out") != -1) {
+                                schedule.put("status", "Sold out");
+                            }
+                            List<String> dNotes = new ArrayList<>();
+                            if (noteStr.indexOf('H') != -1) {
+                                dNotes.add("H");
+                            }
+                            if (noteStr.indexOf('R') != -1) {
+                                dNotes.add("R");
+                            }
+                            if (noteStr.indexOf('W') != -1) {
+                                dNotes.add("W");
+                            }
+                            if (noteStr.indexOf('*') != -1) {
+                                dNotes.add("*");
+                            }
+                            if (dNotes.size() > 0) {
+                                schedule.put("note", new JSONArray(dNotes));
                             }
                         }
-                        schedules.put(schedule);
+                        schedules.put(new JSONObject(schedule));
                     }
 
-                    tripDate.put("schedules", schedules);
-                    tripDates.put(tripDate);
+                    tripDate.put("departures", schedules);
+
+                    // note
+                    NodeList childrenList = date.getChildNodes();
+                    List<String> notes = new ArrayList<>();
+                    for (int k = 0; k < childrenList.getLength(); k++) {
+                        Node node = childrenList.item(k);
+                        if (node.getNodeName().equals("note")) {
+                            String note = TripUtils.nodeToString(node).replaceAll("\\r|\\n|\\t", "");
+                            if (note.length() > 13) {
+                                notes.add(note.substring(6, note.length() - 7));
+                            }
+                        }
+                    }
+                    if (notes.size() > 0) {
+                        tripDate.put("note", notes);
+                    }
                 }
+
+                tripDates.put(new JSONObject(tripDate));
             }
 
             return tripDates;
-        } catch (JSONException e) {
-            throw new DataBuilderException(e.getMessage());
+        } catch (SAXException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (ParserConfigurationException e) {
+            e.printStackTrace();
         }
+
+        return null;
     }
 
     private String processShortSummary(String tripPath, String tripId) throws JSONException {
@@ -674,12 +726,16 @@ public class TripDataBuilder {
 
     private String processTripSummary(Element ele) {
         NodeList list = ele.getElementsByTagName("p");
-        String summary = "";
+        StringBuilder builder = new StringBuilder();
         for (int i = 0; i < list.getLength(); i++) {
-            summary += TripUtils.nodeToString(list.item(i)).replaceAll("\\r|\\n|\\t", "");
+            builder.append(TripUtils.nodeToString(list.item(i)).replaceAll("\\r|\\n|\\t", ""));
+
+            if (i < list.getLength() - 1) {
+                builder.append('\n');
+            }
         }
 
-        return summary;
+        return builder.toString();
     }
 
     private List<String> processTripHighlight(Element ele) {
@@ -726,10 +782,10 @@ public class TripDataBuilder {
             try {
                 List<JSONObject> items = new ArrayList<>();
                 for (int i = 0; i < list.getLength(); i++) {
-                    JSONObject item = new JSONObject();
+                    Map<String, String> item = new LinkedHashMap<>();
                     Element itinerary = (Element) list.item(i);
                     item.put("heading", itinerary.getElementsByTagName("heading").item(0).getTextContent().trim());
-                    item.put("title", itinerary.getElementsByTagName("subhead").item(0).getTextContent().trim());
+                    item.put("subheading", itinerary.getElementsByTagName("subhead").item(0).getTextContent().trim());
 
                     String description = "";
                     NodeList copy = itinerary.getElementsByTagName("p");
@@ -737,9 +793,9 @@ public class TripDataBuilder {
                         description += TripUtils.nodeToString(copy.item(j)).replaceAll("\\r|\\n", "").replaceAll("\\s+", " ");
                     }
                     item.put("description", description);
-                    items.add(item);
+                    items.add(new JSONObject(item));
                 }
-                json.put("itinerary", items);
+                json.put("dailyItinerary", items);
                 json.put("note", itineraryNote);
             } catch (JSONException e) {
                 e.printStackTrace();
@@ -795,14 +851,15 @@ public class TripDataBuilder {
     }
 
     private void createBasicJson(
-            String tripPath, String regionName, String tripId, String tripLegacyId, boolean standAlone) {
+            String tripPath, String regionName, String tripId, String tripLegacyId, String extensionType) {
 
         JSONObject tripOld = tripJsons.get(tripId);
-        JSONObject tripNew = new JSONObject();
+        Map<String, Object> tripNew = new LinkedHashMap<>();
 
         try {
             tripNew.put("tripId", tripId);
-            tripNew.put("tripLegacyId", tripLegacyId);
+            tripNew.put("tripTitle", getTypedContent(tripOld.get("trip_title")));
+            tripNew.put("tripSubtitle", "");
             tripNew.put("region", regionName);
             if (tripOld.has("country")) {
                 tripNew.put("country", tripOld.getString("country"));
@@ -810,10 +867,20 @@ public class TripDataBuilder {
             if (tripOld.has("state")) {
                 tripNew.put("state", tripOld.getString("state"));
             }
-            tripNew.put("tripTitle", getTypedContent(tripOld.get("trip_title")));
-            tripNew.put("tripSubtitle", "SUBTITLE");
             tripNew.put("pageTitle", getTypedContent(tripOld.get("page_title")));
             tripNew.put("metaDescription", getTypedContent(tripOld.get("meta_description")));
+            if (tripOld.has("trip_listing_summary")) {
+                tripNew.put("tripShortSummary", getShortSummaryFromXml(tripId));
+            } else {
+                tripNew.put("tripShortSummary", processShortSummary(tripPath, tripId));
+            }
+            JSONObject gallery = processImages(regionName, tripId);
+            if (tripOld.has("video")) {
+                gallery = processVideo(gallery, tripOld.getJSONObject("video"));
+            }
+            tripNew.put("tripGallery", gallery);
+            tripNew.put("map",
+                TripConstants.TRIP_IMG_ASSETS_BASE + "maps/" + regionName + "/" + tripId + "_map.jpg");
             tripNew.put("days", getTypedContent(tripOld.get("totalDays")));
             if (tripOld.has("groupSize")) {
                 tripNew.put("groupSize", getTypedContent(tripOld.get("groupSize")));
@@ -822,17 +889,10 @@ public class TripDataBuilder {
             }
             tripNew.put("activityLevel", getTypedContent(tripOld.get("activity_level")));
             tripNew.put("activities", processActivities(tripOld.getJSONObject("activities")));
-            tripNew.put("price", processPrice(tripOld.getJSONObject("tripCosts")));
-            JSONObject gallery = processImages(regionName, tripId);
-            if (tripOld.has("video")) {
-                gallery = processVideo(gallery, tripOld.getJSONObject("video"));
+            if (tripOld.has("primary_activities")) {
+                tripNew.put("primaryActivities", processPrimaryActivities(tripOld.getString("primary_activities")));
             }
-            tripNew.put("tripGallery", gallery);
-            tripNew.put("tripDates", processDates(tripOld.get("trip_dates")));
-            if (tripOld.has("accomodations")) {
-                tripNew.put("accommodations", tripOld.getJSONObject("accomodations")
-                        .getString("accomodationDescription"));
-            }
+            // TAGS
             JSONArray tags = new JSONArray();
             if (tripOld.has("trip_subtype")) {
                 String tripSubType = tripOld.getString("trip_subtype");
@@ -842,24 +902,33 @@ public class TripDataBuilder {
                 tags.put(tripOld.getString("trip_type"));
             }
             tripNew.put("tags", tags);
-            if (tripOld.has("primary_activities")) {
-                tripNew.put("primaryActivities", processPrimaryActivities(tripOld.getString("primary_activities")));
-            }
             if (tripOld.has("destination_bullet_list")) {
-                tripNew.put("destinationTypes",
-                        processDestinationTypes(tripOld.getJSONObject("destination_bullet_list")));
+                List<String> destinationTypes =
+                        processDestinationTypes(tripOld.getJSONObject("destination_bullet_list"));
+                if (destinationTypes.contains(TripConstants.TRIP_TYPE_SIGNATURE_CAMPING)) {
+                    tags.put(TripConstants.TRIP_TYPE_SIGNATURE_CAMPING);
+                    tripNew.put("tags", tags);
+                    destinationTypes = destinationTypes.stream()
+                            .filter(dest -> !dest.equals(TripConstants.TRIP_TYPE_SIGNATURE_CAMPING))
+                            .collect(Collectors.toList());
+                }
+                tripNew.put("destinationTypes",destinationTypes);
             }
-            if (tripOld.has("trip_listing_summary")) {
-                tripNew.put("tripShortSummary", getShortSummaryFromXml(tripId));
-            } else {
-                tripNew.put("tripShortSummary", processShortSummary(tripPath, tripId));
+            if (tripOld.has("accomodations")) {
+                tripNew.put("accommodations", tripOld.getJSONObject("accomodations")
+                        .getString("accomodationDescription"));
             }
             tripNew.put("heroCardAlign", "left");
-            tripNew.put("standAlone", standAlone);
+            if (StringUtils.isNotBlank(extensionType)) {
+                tripNew.put("extensionType", extensionType);
+            }
+            tripNew.put("price", processPrice(tripOld.getJSONObject("tripCosts")));
+            tripNew.put("tripDates", processDates(regionName, tripId));
+            tripNew.put("tripLegacyId", tripLegacyId);
 
             TripUtils.createDirectory(TripConstants.TRIP_JSON_PATH + regionName + "/" + tripId);
             TripUtils.writeJsonToFile(
-                    regionName + "/" + tripId + ".json", tripNew);
+                    regionName + "/" + tripId + ".json", new JSONObject(tripNew));
 
         } catch (JSONException e) {
             e.printStackTrace();
@@ -875,14 +944,13 @@ public class TripDataBuilder {
 
         if (doc != null) {
             try {
-                JSONObject json = new JSONObject();
-                json.put("map", TripConstants.TRIP_IMG_ASSETS_BASE + "tripMaps/" + tripId + "_map.jpg");
+                Map<String, Object> json = new LinkedHashMap<>();
 
                 if (doc.getElementsByTagName("trip_summary").getLength() > 0) {
+                    json.put("highlights",
+                            processTripHighlight((Element) doc.getElementsByTagName("trip_summary").item(0)));
                     json.put("tripSummary",
                             processTripSummary((Element) doc.getElementsByTagName("trip_summary").item(0)));
-                    json.put("highlight",
-                            processTripHighlight((Element) doc.getElementsByTagName("trip_summary").item(0)));
                 }
 
                 String itineraryNote = "";
@@ -908,25 +976,34 @@ public class TripDataBuilder {
 
                 // adding a fake trip guide
                 JSONArray guides = new JSONArray();
-                JSONObject guide = new JSONObject();
+                Map<String, String> guide = new LinkedHashMap<>();
                 guide.put("name", "Anderson Smith");
                 guide.put("description", "Anderson was born in Lesiraa Village in the heart of Maasai country. The Maasai are pastoralists, and as a young man Anderson herded his family's livestock in the bush.");
-                guide.put("image", "/assets/img/adventures/trip/guides/anderson_smith.jpg");
-                json.put("tripGuide", guides.put(guide));
+                guide.put("image", "/assets/img/adventures/trip/guides/" + regionName + "/anderson_smith.jpg");
+                json.put("tripGuide", guides.put(new JSONObject(guide)));
 
                 // adding a fake program manager
-                JSONObject manager = new JSONObject();
+                Map<String, String> manager = new LinkedHashMap<>();
                 manager.put("name", "Rebecca Taylor");
-                manager.put("description", "Rebecca is a great program manager.");
-                manager.put("image", "/assets/img/adventures/trip/programManagers/rebecca_taylor.jpg");
-                json.put("programManager", manager);
+                manager.put("description", "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nam placerat viverra lobortis. Vestibulum gravida nec risus ut tincidunt. Fusce vitae mattis nisl. Quisque consectetur dolor pulvinar, placerat tortor at, egestas enim.");
+                manager.put("image", "/assets/img/adventures/trip/programManagers/" + regionName + "/rebecca_taylor.jpg");
+                json.put("programManager", new JSONObject(manager));
+
+                // adding  a fake review
+                Map<String, String> review = new LinkedHashMap<>();
+                review.put("title", "Kate the safari lover");
+                review.put("subtitle", "Over the top amazing trip");
+                review.put("rating", "4");
+                review.put("description", "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nam placerat viverra lobortis. Vestibulum gravida nec risus ut tincidunt. Fusce vitae mattis nisl. Quisque consectetur dolor pulvinar, placerat tortor at, egestas enim.");
+                review.put("image", "/assets/img/adventures/trip/reviews/" + regionName + "/" + tripId + "_review.jpg");
+                json.put("review", new JSONObject(review));
 
                 // add gear content
                 json.put("gearContents", processGear(tripPath, tripId));
 
                 TripUtils.createDirectory(TripConstants.TRIP_JSON_PATH + regionName + "/" + tripId);
                 TripUtils.writeJsonToFile(regionName + "/" + tripId + "/" + tripId + "-" +
-                        TripConstants.TRIP_DETAIL_FILENAME, json);
+                        TripConstants.TRIP_DETAIL_FILENAME, new JSONObject(json));
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -935,7 +1012,7 @@ public class TripDataBuilder {
 
     private void createGalleryJson(String tripPath, String regionName, String tripId) {
         String url = TripConstants.DOC_BASE + tripPath + tripId + TripConstants.DOC_SLIDE_SHOW_FILE_NAME;
-        String xml = "";
+        String xml;
         try {
             xml = TripUtils.getFileContent(url);
 
@@ -950,10 +1027,11 @@ public class TripDataBuilder {
                     Map<String, String> image = new LinkedHashMap<>();
                     String imageSrc = pic.getString("image");
                     String thumbSrc = pic.getString("thumbnail");
-                    String base = TripConstants.TRIP_IMG_ASSETS_BASE + "regions/" +
-                            regionName + "/" + tripId + "/";
-                    image.put("image", base + imageSrc.toLowerCase().substring(imageSrc.lastIndexOf('/') + 1));
-                    image.put("thumbnail", base + thumbSrc.toLowerCase().substring(thumbSrc.lastIndexOf('/') + 1));
+                    String base = TripConstants.TRIP_IMG_ASSETS_BASE + "gallery/" + regionName + "/";
+                    image.put("url", base + tripId + "_" + String.format("%02d", j + 1) + ".jpg");
+                    image.put("thumbnail", base + tripId + "_" + String.format("%02d", j + 1) + "_thumb.jpg");
+//                    image.put("url", base + imageSrc.toLowerCase().substring(imageSrc.lastIndexOf('/') + 1));
+//                    image.put("thumbnail", base + thumbSrc.toLowerCase().substring(thumbSrc.lastIndexOf('/') + 1));
                     if (pic.has("caption")) {
                         image.put("caption", pic.getString("caption"));
                     }
