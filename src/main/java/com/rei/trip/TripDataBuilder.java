@@ -18,12 +18,7 @@ import org.xml.sax.SAXException;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
-import java.io.BufferedInputStream;
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.URL;
-import java.net.URLConnection;
+import java.io.*;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -80,7 +75,11 @@ public class TripDataBuilder {
                 JSONArray tripArrayNew = new JSONArray();
                 for (int j = 0; j < tripArrayOld.length(); j++) {
                     JSONObject tripInfo = getTripId(tripArrayOld.getString(j));
-                    tripArrayNew.put(tripInfo);
+                    if (tripInfo.getString("tripId").equals("oar")) {
+                        System.out.println("Skip to generate trip for trip id : OAR");
+                    } else {
+                        tripArrayNew.put(tripInfo);
+                    }
                 }
                 String regionName = processRegionName(regionOld.getString("regionName"));
                 regionNew.put("regionName", TripUtils.toCamelCase(regionName));
@@ -212,31 +211,9 @@ public class TripDataBuilder {
         }
     }
 
-    private Document getXmlDocument(String tripPath, String tripId, String type) {
-        String url = TripConstants.DOC_BASE + tripPath + tripId + type;
-        Document doc = null;
-        try {
-            URL loc = new URL(url);
-            URLConnection urlConnection = loc.openConnection();
-            InputStream in = new BufferedInputStream(urlConnection.getInputStream());
-            DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
-            DocumentBuilder dBuilder = dbFactory.newDocumentBuilder();
-            doc = dBuilder.parse(in);
-            doc.getDocumentElement().normalize();
-        } catch (IOException e) {
-            //e.printStackTrace();
-        } catch (ParserConfigurationException e) {
-            e.printStackTrace();
-        } catch (SAXException e) {
-            e.printStackTrace();
-        }
-
-        return doc;
-    }
-
     private JSONArray processGear(String tripPath, String tripId) throws DataBuilderException {
         try {
-            Document doc = getXmlDocument(tripPath, tripId, TripConstants.DOC_GEAR_FILE_NAME);
+            Document doc = TripUtils.getXmlDocument(tripPath, tripId, TripConstants.DOC_GEAR_FILE_NAME);
             JSONArray gearContents = new JSONArray();
             if (doc != null) {
                 NodeList list = doc.getElementsByTagName("section");
@@ -700,7 +677,7 @@ public class TripDataBuilder {
     }
 
     private String processShortSummary(String tripPath, String tripId) throws JSONException {
-        Document doc = getXmlDocument(tripPath, tripId, TripConstants.DOC_DETAIL_FILE_NAME);
+        Document doc = TripUtils.getXmlDocument(tripPath, tripId, TripConstants.DOC_DETAIL_FILE_NAME);
         String summary = "";
 
         if (doc != null) {
@@ -784,7 +761,8 @@ public class TripDataBuilder {
                 for (int i = 0; i < list.getLength(); i++) {
                     Map<String, String> item = new LinkedHashMap<>();
                     Element itinerary = (Element) list.item(i);
-                    item.put("heading", itinerary.getElementsByTagName("heading").item(0).getTextContent().trim());
+                    item.put("heading", itinerary.getElementsByTagName("heading").item(0).getTextContent().trim()
+                            .replaceAll("\\r|\\n", "").replaceAll("\\s+", " "));
                     item.put("subheading", itinerary.getElementsByTagName("subhead").item(0).getTextContent().trim());
 
                     String description = "";
@@ -829,9 +807,8 @@ public class TripDataBuilder {
 
             String key = TripUtils.toCamelCase(title);
 
-            if (title.equals("Special Payment, Cancellation, and Transfer Policy") ||
-                    title.equals("Special Payment and Cancellation Policy")) {
-                key = "specialPolicy";
+            if (title.contains("Cancellation")) {
+                key = "cancellationPolicy";
             }
 
             if (title.equals("Medical & Evacuation Insurance")) {
@@ -940,7 +917,7 @@ public class TripDataBuilder {
     }
 
     private void createDetailJson(String tripPath, String regionName, String tripId) {
-        Document doc = getXmlDocument(tripPath, tripId, TripConstants.DOC_DETAIL_FILE_NAME);
+        Document doc = TripUtils.getXmlDocument(tripPath, tripId, TripConstants.DOC_DETAIL_FILE_NAME);
 
         if (doc != null) {
             try {
@@ -983,10 +960,7 @@ public class TripDataBuilder {
                 json.put("tripGuide", guides.put(new JSONObject(guide)));
 
                 // adding a fake program manager
-                Map<String, String> manager = new LinkedHashMap<>();
-                manager.put("name", "Rebecca Taylor");
-                manager.put("description", "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nam placerat viverra lobortis. Vestibulum gravida nec risus ut tincidunt. Fusce vitae mattis nisl. Quisque consectetur dolor pulvinar, placerat tortor at, egestas enim.");
-                manager.put("image", "/assets/img/adventures/trip/programManagers/" + regionName + "/rebecca_taylor.jpg");
+                Map<String, String> manager = getProgramManagerFromCSV(regionName, tripId);
                 json.put("programManager", new JSONObject(manager));
 
                 // adding  a fake review
@@ -1008,6 +982,46 @@ public class TripDataBuilder {
                 e.printStackTrace();
             }
         }
+    }
+
+    private Map<String, String> getProgramManagerFromCSV(String region, String tripId) {
+        Map<String, String> manager = new LinkedHashMap<>();
+
+        String csvFile = TripConstants.TRIP_JSON_PATH + "programManagers.txt";
+        BufferedReader br = null;
+        String line = "";
+        String cvsSplitBy = "@";
+
+        try {
+            File fileDir = new File(csvFile);
+            br = new BufferedReader(new InputStreamReader(new FileInputStream(fileDir), "UTF8"));
+
+            while ((line = br.readLine()) != null) {
+                // use comma as separator
+                String[] item = line.split(cvsSplitBy);
+
+                if (item[1].toLowerCase().equals(tripId)) {
+                    manager.put("name", item[2]);
+                    manager.put("description", item[3]);
+                    manager.put("image", "/assets/img/adventures/trip/programManagers/" + region + "/" + item[4]);
+                    return manager;
+                }
+            }
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            if (br != null) {
+                try {
+                    br.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+
+        return null;
     }
 
     private void createGalleryJson(String tripPath, String regionName, String tripId) {
